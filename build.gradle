@@ -1,19 +1,11 @@
-// Gradle Configuration File
-// For more details take a look at the Java Quickstart chapter in the Gradle
-// user guide available at http://gradle.org/docs/5.2.1/userguide/tutorial_java_projects.html
-
-import org.gradle.api.tasks.testing.logging.TestLogEvent
-
 plugins {
     id 'java'
-    id 'jacoco'
     id 'checkstyle'
-    id 'com.github.kt3k.coveralls' version '2.4.0'
-    id 'com.github.johnrengelman.shadow' version '4.0.4'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
     id 'application'
+    id 'jacoco'
 }
 
-// Specifies the entry point of the application
 mainClassName = 'seedu.address.Main'
 
 sourceCompatibility = JavaVersion.VERSION_11
@@ -25,23 +17,71 @@ repositories {
 }
 
 checkstyle {
-    toolVersion = '8.1'
+    toolVersion = '10.2'
 }
 
-jacocoTestReport {
-    reports {
-        xml.enabled false
-        csv.enabled false
-        html.destination file("${buildDir}/jacocoHtml")
-    }
+run {
+    enableAssertions = true
+}
+
+task(guiTests)
+guiTests {
+    dependsOn test
 }
 
 test {
     useJUnitPlatform()
+
+    systemProperty 'testfx.setup.timeout', '60000'
+
+    doFirst {
+        boolean runGuiTests = gradle.taskGraph.hasTask(guiTests)
+
+        if (!runGuiTests) {
+            exclude 'seedu/address/ui/**'
+        }
+    }
+
+    finalizedBy jacocoTestReport
+}
+
+task headless {
+    doFirst {
+        println 'Setting headless mode properties.'
+        test {
+            systemProperties = [
+                    'java.awt.headless': 'true',
+                    'testfx.robot': 'glass',
+                    'testfx.headless': 'true',
+                    'prism.order': 'sw',
+                    'prism.text': 't2k',
+            ]
+        }
+    }
+}
+
+// Makes sure that headless properties are set before running tests
+test.mustRunAfter headless
+
+task coverage(type: JacocoReport) {
+    sourceDirectories.from files(sourceSets.main.allSource.srcDirs)
+    classDirectories.from files(sourceSets.main.output)
+    executionData.from files(jacocoTestReport.executionData)
+    afterEvaluate {
+        classDirectories.from files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: ['**/*.jar'])
+        })
+    }
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+run {
+    enableAssertions = true
 }
 
 dependencies {
-    String testFxVersion = '4.0.15-alpha'
     String jUnitVersion = '5.4.0'
     String javaFxVersion = '11'
 
@@ -57,125 +97,21 @@ dependencies {
     implementation group: 'org.openjfx', name: 'javafx-graphics', version: javaFxVersion, classifier: 'win'
     implementation group: 'org.openjfx', name: 'javafx-graphics', version: javaFxVersion, classifier: 'mac'
     implementation group: 'org.openjfx', name: 'javafx-graphics', version: javaFxVersion, classifier: 'linux'
-    implementation group: 'org.openjfx', name: 'javafx-media', version: javaFxVersion, classifier: 'win'
-    implementation group: 'org.openjfx', name: 'javafx-media', version: javaFxVersion, classifier: 'mac'
-    implementation group: 'org.openjfx', name: 'javafx-media', version: javaFxVersion, classifier: 'linux'
-    implementation group: 'org.openjfx', name: 'javafx-web', version: javaFxVersion, classifier: 'win'
-    implementation group: 'org.openjfx', name: 'javafx-web', version: javaFxVersion, classifier: 'mac'
-    implementation group: 'org.openjfx', name: 'javafx-web', version: javaFxVersion, classifier: 'linux'
 
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.7.0'
     implementation group: 'com.fasterxml.jackson.datatype', name: 'jackson-datatype-jsr310', version: '2.7.4'
 
-    testImplementation group: 'org.testfx', name: 'testfx-core', version: testFxVersion
-
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: jUnitVersion
 
-    testRuntimeOnly group: 'org.testfx', name: 'openjfx-monocle', version: 'jdk-11+26'
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: jUnitVersion
+
+    testImplementation "org.testfx:testfx-core:4.0.16-alpha"
+    testImplementation "org.junit.jupiter:junit-jupiter-api:5.5.1"
+    testImplementation "org.testfx:testfx-junit5:4.0.16-alpha"
 }
 
 shadowJar {
-    archiveName = 'addressbook.jar'
-
-    destinationDir = file("${buildDir}/jar/")
+    archiveFileName = 'addressbook.jar'
 }
 
-task coverage(type: JacocoReport) {
-    sourceDirectories.from files(sourceSets.main.allSource.srcDirs)
-    classDirectories.from files(sourceSets.main.output)
-    executionData.from files(jacocoTestReport.executionData)
-    afterEvaluate {
-        classDirectories.from files(classDirectories.files.collect {
-            fileTree(dir: it, exclude: ['**/*.jar'])
-        })
-    }
-    reports {
-        html.enabled = true
-        xml.enabled = true
-    }
-}
-
-coveralls {
-    sourceDirs = sourceSets.main.allSource.srcDirs.absolutePath
-    jacocoReportPath = "${buildDir}/reports/jacoco/coverage/coverage.xml"
-}
-
-tasks.coveralls {
-    dependsOn coverage
-    onlyIf { System.env.'CI' }
-}
-
-task(guiTests)
-task(nonGuiTests)
-
-// Run `test` task if `guiTests` or `nonGuiTests` is specified
-guiTests.dependsOn test
-nonGuiTests.dependsOn test
-
-task(allTests)
-
-// `allTests` implies both `guiTests` and `nonGuiTests`
-allTests.dependsOn guiTests
-allTests.dependsOn nonGuiTests
-
-test {
-    systemProperty 'testfx.setup.timeout', '60000'
-
-    testLogging {
-        events TestLogEvent.FAILED, TestLogEvent.SKIPPED
-
-        // Prints the currently running test's name in the CI's build log,
-        // so that we can check if tests are being silently skipped or
-        // stalling the build.
-        if (System.env.'CI') {
-            events << TestLogEvent.STARTED
-        }
-    }
-
-    jacoco {
-        destinationFile = new File("${buildDir}/jacoco/test.exec")
-    }
-
-    doFirst {
-        boolean runGuiTests = gradle.taskGraph.hasTask(guiTests)
-        boolean runNonGuiTests = gradle.taskGraph.hasTask(nonGuiTests)
-
-        if (!runGuiTests && !runNonGuiTests) {
-            runGuiTests = true
-            runNonGuiTests = true
-        }
-
-        if (runNonGuiTests) {
-            test.include 'seedu/address/**'
-        }
-
-        if (runGuiTests) {
-            test.include 'systemtests/**'
-            test.include 'seedu/address/ui/**'
-        }
-
-        if (!runGuiTests) {
-            test.exclude 'seedu/address/ui/**'
-        }
-    }
-}
-
-task headless {
-    doLast {
-        println 'Setting headless mode properties.'
-        test {
-            systemProperties = [
-                'testfx.robot': 'glass',
-                'testfx.headless': 'true',
-                'prism.order': 'sw',
-                'prism.text': 't2k',
-            ]
-        }
-    }
-}
-
-// Makes sure that headless properties are set before running tests
-test.mustRunAfter headless
-
-defaultTasks 'clean', 'headless', 'allTests', 'coverage'
+defaultTasks 'clean', 'test', 'headless'
